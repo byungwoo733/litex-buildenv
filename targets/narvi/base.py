@@ -88,6 +88,12 @@ class BaseSoC(SoCSDRAM):
     )
     csr_map_update(SoCSDRAM.csr_map, csr_peripherals)
 
+    SoCSDRAM.mem_map = {
+        "rom":      0x00000000,
+        "sram":     0x10000000,
+        "main_ram": 0x40000000,
+        "csr":      0xe0000000,
+    }
     mem_map = {
         "spiflash": 0x20000000,  # (default shadow @0xa0000000)
     }
