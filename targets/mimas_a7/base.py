@@ -6,12 +6,14 @@ from litex.soc.integration.soc_core import mem_decoder
 from litex.soc.integration.soc_sdram import *
 from litex.soc.integration.builder import *
 from litex.soc.cores.uart import *
+from litex.soc.interconnect import wishbone
 
 from litedram.modules import MT41K128M16
 from litedram.phy import a7ddrphy
 from litedram.core import ControllerSettings
 
 from gateware import info
+from gateware import shared_uart
 from gateware import spi_flash
 
 from targets.utils import csr_map_update, period_ns
@@ -85,6 +87,7 @@ class BaseSoC(SoCSDRAM):
         "spiflash",
         "ddrphy",
         "info",
+        "uart",
     )
     csr_map_update(SoCSDRAM.csr_map, csr_peripherals)
 
@@ -97,12 +100,13 @@ class BaseSoC(SoCSDRAM):
 
     mem_map = {
         "spiflash": 0x20000000,  # (default shadow @0xa0000000)
+        "emulator_ram": 0x50000000,  # (default shadow @0xd0000000)
     }
     mem_map.update(SoCSDRAM.mem_map)
 
     def __init__(self, platform, spiflash="spiflash_1x", **kwargs):
         clk_freq = int(100e6)
-        SoCSDRAM.__init__(self, platform, clk_freq,
+        SoCSDRAM.__init__(self, platform, clk_freq, with_uart=False,
             integrated_rom_size=0x10000,
             integrated_sram_size=0x10000,
             **kwargs)
@@ -110,6 +114,9 @@ class BaseSoC(SoCSDRAM):
         self.submodules.crg = _CRG(platform)
         self.crg.cd_sys.clk.attr.add("keep")
         self.platform.add_period_constraint(self.crg.cd_sys.clk, period_ns(clk_freq))
+        self.submodules.suart = shared_uart.SharedUART(self.clk_freq, 115200)
+        self.suart.add_uart_pads(platform.request('serial'))
+        self.submodules.uart = self.suart.uart
 
         # Basic peripherals
         self.submodules.info = info.Info(platform, self.__class__.__name__)
@@ -144,5 +151,15 @@ class BaseSoC(SoCSDRAM):
         self.add_wb_slave(mem_decoder(self.mem_map["spiflash"]), self.spiflash.bus)
         self.add_memory_region(
             "spiflash", self.mem_map["spiflash"], 16*1024*1024)
+        
+        if self.cpu_type == "vexriscv" and self.cpu_variant == "linux":
+            size = 0x4000
+            self.submodules.emulator_ram = wishbone.SRAM(size)
+            self.register_mem("emulator_ram", self.mem_map["emulator_ram"], self.emulator_ram.bus, size)
+        
+        bios_size = 0x8000
+        self.flash_boot_address = self.mem_map["spiflash"]+platform.gateware_size+bios_size  
+              
+        self.add_interrupt("uart")
 
 SoC = BaseSoC
